@@ -1,0 +1,8 @@
+[package]
+name = "xmas-dwarf"
+version = "0.1.0"
+authors = ["Nick Cameron <ncameron@mozilla.com>"]
+
+[dependencies]
+xmas-elf = { git = "https://github.com/nrc/xmas-elf" }
+leb128 = { git = "https://github.com/nrc/leb128" }
