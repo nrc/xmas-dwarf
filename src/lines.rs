@@ -11,9 +11,6 @@ pub fn read_lines(input: &[u8]) -> LinesProgram {
     let header = read_header(input);
 
     let input = &input[10 + header.header_start.header_length as usize ..];
-    // for i in input {
-    //     println!("{}", i);
-    // }
     let program = read_statements(&header, input);
 
     LinesProgram {
@@ -22,8 +19,19 @@ pub fn read_lines(input: &[u8]) -> LinesProgram {
     }
 }
 
-pub fn decode_lines(lines: LinesProgram, input: &[u8]) -> LinesTable {
-    unimplemented!();
+pub fn decode_lines<'a>(mut lines: LinesProgram<'a>) -> LinesTable<'a> {
+    let matrix = {
+        let mut machine = StateMachine::new(&mut lines.header);
+        for s in &lines.program {
+            machine.execute(s);
+        }
+        machine.matrix
+    };
+
+    LinesTable {
+        header: lines.header,
+        lines: matrix,
+    }
 }
 
 fn read_header(input: &[u8]) -> Header {
@@ -279,13 +287,27 @@ enum Statement<'a> {
     SetDiscriminator(u32),
 }
 
-pub struct LinesTable {
-    todo: u32,
+#[derive(Debug)]
+pub struct LinesTable<'a> {
+    header: Header<'a>,
+    // TODO should we keep an efficient way to access lines by address?
+    lines: Vec<Line>,
 }
 
-#[derive(Debug, Clone)]
-struct StateMachine {
-    address: u32,
+impl<'a> fmt::Display for LinesTable<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        try!(writeln!(f, "Lines table:"));
+        for l in &self.lines {
+            let file_name = self.header.file_names[(l.file - 1) as usize].name;
+            try!(writeln!(f, "    0x{:x}: {}:{}", l.address, file_name, l.line));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Line {
+    address: u64,
     // FIXME version 4+ only
     //op_index: u8,
     file: u32,
@@ -300,20 +322,125 @@ struct StateMachine {
     discriminator: u32,
 }
 
-impl StateMachine {
-    fn new(default_is_stmt: bool) -> StateMachine {
-        StateMachine {
+impl Line {
+    fn new(is_stmt: bool) -> Line {
+        Line {
             address: 0,
             file: 1,
             line: 1,
             column: 0,
-            is_stmt: default_is_stmt,
+            is_stmt: is_stmt,
             basic_block: false,
             end_sequence: false,
             prologue_end: false,
             epilogue_begin: false,
             isa: 0,
-            discriminator: 0,
+            discriminator: 0,            
         }
+    }
+}
+
+#[derive(Debug)]
+struct StateMachine<'a, 'b: 'a> {
+    header: &'a mut Header<'b>,
+    matrix: Vec<Line>,
+    line: Line,
+}
+
+impl<'a, 'b: 'a> StateMachine<'a, 'b> {
+    fn new(header: &'a mut Header<'b>) -> StateMachine<'a, 'b> {
+        let is_stmt = header.header_start.default_is_stmt == 1;
+        StateMachine {
+            header: header,
+            matrix: vec![],
+            line: Line::new(is_stmt),
+        }
+    }
+
+    fn execute(&mut self, stmt: &Statement<'b>) {
+        match *stmt {
+            Statement::Special(arg) => {
+                let op_advance = arg as u64 / self.header.header_start.line_range as u64;
+                self.line.line = (self.line.line as i64 +
+                                  self.header.header_start.line_base as i64 +
+                                  (arg % self.header.header_start.line_range) as i64) as u32;
+                self.line.address += self.header.header_start.minimum_instruction_length as u64 *
+                                     op_advance;
+                self.matrix.push(self.line);
+                self.line.discriminator = 0;
+                self.line.basic_block = false;
+                self.line.prologue_end = false;
+                self.line.epilogue_begin = false;
+            }
+            Statement::Copy => {
+                self.matrix.push(self.line);
+                self.line.discriminator = 0;
+                self.line.basic_block = false;
+                self.line.prologue_end = false;
+                self.line.epilogue_begin = false;
+            }
+            Statement::AdvancePc(arg) => {
+                self.line.address += self.header.header_start.minimum_instruction_length as u64 *
+                                     arg as u64;
+            }
+            Statement::AdvanceLine(arg) => {
+                self.line.line = (self.line.line as i64 + arg as i64) as u32;
+            }
+            Statement::SetFile(arg) => {
+                self.line.file = arg;
+            }
+            Statement::SetColumn(arg) => {
+                self.line.column = arg;
+            }
+            Statement::NegateStmt => {
+                self.line.is_stmt != self.line.is_stmt;
+            }
+            Statement::SetBasicBlock => {
+                self.line.basic_block = true;
+            }
+            Statement::ConstAddPc => {
+                let arg = 255 - self.header.header_start.opcode_base;
+                let op_advance = arg as u64 / self.header.header_start.line_range as u64;
+                self.line.address += self.header.header_start.minimum_instruction_length as u64 *
+                                     op_advance;
+            }
+            Statement::FixedAdvancePc(arg) => {
+                self.line.address += arg as u64;
+                //self.op_index = 0;
+            }
+            Statement::SetPrologueEnd => {
+                self.line.prologue_end = true;
+            }
+            Statement::SetEpilogueBeing => {
+                self.line.epilogue_begin = true;
+            }
+            Statement::SetIsa(arg) => {
+                self.line.isa = arg;
+            }
+            Statement::EndSequence => {
+                self.line.end_sequence = true;
+                self.matrix.push(self.line);
+                self.reset_registers();
+            }
+            Statement::SetAddress(arg) => {
+                self.line.address = arg;
+                //self.op_index = 0;
+            }
+            Statement::DefineFile(name, dir_index, last_modified, size) => {
+                self.header.file_names.push(FileEntry{
+                    name: name,
+                    dir_index: dir_index,
+                    last_modified: last_modified,
+                    size: size,
+                });
+            }
+            Statement::SetDiscriminator(arg) => {
+                self.line.discriminator = arg;
+            }
+        }
+    }
+
+    fn reset_registers(&mut self) {
+        self.line = Line::new(self.header.header_start.default_is_stmt == 1);
     }
 }

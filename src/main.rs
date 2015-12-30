@@ -18,6 +18,8 @@ fn main() {
     // println!("{}", abbrev);
     let lines = lines::read_lines(raw_data(&elf_file, SectionName::Line));
     println!("{}", lines);
+    let lines = lines::decode_lines(lines);
+    println!("{}", lines);
 }
 
 fn raw_data<'a>(elf_file: &'a ElfFile<'a>, name: SectionName) -> &'a [u8] {
