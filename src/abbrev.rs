@@ -1,6 +1,6 @@
 // Handle the abbreviation table
 
-use leb128::ULeb128Ref;
+use leb128::ULeb128;
 
 use std::fmt;
 use std::mem;
@@ -43,10 +43,10 @@ fn read_abbrev_entry(input: &[u8]) -> (AbbrevEntry, usize) {
 }
 
 
-fn read_pairs_to_null(input: &[u8]) -> (Vec<(ULeb128Ref, ULeb128Ref)>, usize) {
+fn read_pairs_to_null(input: &[u8]) -> (Vec<(ULeb128, ULeb128)>, usize) {
     static NULL_BYTES: [u8; 1] = [0];
 
-    let null = ULeb128Ref::from_bytes(&NULL_BYTES);
+    let null = ULeb128::from_bytes(&NULL_BYTES);
     let mut result = vec![];
     let mut count = 0;
     loop {
@@ -60,8 +60,8 @@ fn read_pairs_to_null(input: &[u8]) -> (Vec<(ULeb128Ref, ULeb128Ref)>, usize) {
     }
 }
 
-fn read_unsigned_leb128(input: &[u8]) -> (ULeb128Ref, usize) {
-    let result = ULeb128Ref::from_bytes(input);
+fn read_unsigned_leb128(input: &[u8]) -> (ULeb128, usize) {
+    let result = ULeb128::from_bytes(input);
     (result, result.byte_count())
 }
 

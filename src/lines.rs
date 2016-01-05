@@ -1,7 +1,7 @@
 use std::mem;
 use std::fmt;
 
-use leb128::{ULeb128Ref, ILeb128Ref};
+use leb128::{ULeb128, ILeb128};
 
 use parsing::{read, parse, parse_str, parse_strs_to_null, parse_array};
 
@@ -70,11 +70,11 @@ fn read_file_entry<'a>(input: &'a [u8]) -> Option<(FileEntry<'a>, usize)> {
 
     let name = parse_str(&input[0]);
     let mut count = name.len() + 1;
-    let dir_index = ULeb128Ref::from_bytes(&input[count..]);
+    let dir_index = ULeb128::from_bytes(&input[count..]);
     count += dir_index.byte_count();
-    let last_modified = ULeb128Ref::from_bytes(&input[count..]);
+    let last_modified = ULeb128::from_bytes(&input[count..]);
     count += last_modified.byte_count();
-    let size = ULeb128Ref::from_bytes(&input[count..]);
+    let size = ULeb128::from_bytes(&input[count..]);
     count += size.byte_count();
 
     Some((FileEntry {
@@ -109,19 +109,19 @@ fn read_statement<'a>(header: &Header<'a>, input: &'a [u8]) -> (Statement<'a>, u
     match first_byte {
         1 => (Statement::Copy, 1),
         2 => {
-            let arg = ULeb128Ref::from_bytes(&input[1..]);
+            let arg = ULeb128::from_bytes(&input[1..]);
             (Statement::AdvancePc(arg.expect_u32()), 1 + arg.byte_count())
         }
         3 => {
-            let arg = ILeb128Ref::from_bytes(&input[1..]);
+            let arg = ILeb128::from_bytes(&input[1..]);
             (Statement::AdvanceLine(arg.expect_i32()), 1 + arg.byte_count())
         }
         4 => {
-            let arg = ULeb128Ref::from_bytes(&input[1..]);
+            let arg = ULeb128::from_bytes(&input[1..]);
             (Statement::SetFile(arg.expect_u32()), 1 + arg.byte_count())
         }
         5 => {
-            let arg = ULeb128Ref::from_bytes(&input[1..]);
+            let arg = ULeb128::from_bytes(&input[1..]);
             (Statement::SetColumn(arg.expect_u32()), 1 + arg.byte_count())
         }
         6 => (Statement::NegateStmt, 1),
@@ -131,7 +131,7 @@ fn read_statement<'a>(header: &Header<'a>, input: &'a [u8]) -> (Statement<'a>, u
         10 => (Statement::SetPrologueEnd, 1),
         11 => (Statement::SetEpilogueBeing, 1),
         12 => {
-            let arg = ULeb128Ref::from_bytes(&input[1..]);
+            let arg = ULeb128::from_bytes(&input[1..]);
             (Statement::SetIsa(arg.expect_u32()), 1 + arg.byte_count())
         }
         _ => unreachable!(),
@@ -141,7 +141,7 @@ fn read_statement<'a>(header: &Header<'a>, input: &'a [u8]) -> (Statement<'a>, u
 // The length component of the returned value should include the first byte
 // which indicates that the statement has an extended opcode.
 fn read_statement_extended<'a>(input: &'a [u8]) -> (Statement<'a>, usize) {
-    let size = ULeb128Ref::from_bytes(&input[1..]);
+    let size = ULeb128::from_bytes(&input[1..]);
     let actual_size = size.expect_u64() as usize + 1 + size.byte_count();
     let offset = 1 + size.byte_count();
     let op_code = input[offset];
@@ -150,17 +150,17 @@ fn read_statement_extended<'a>(input: &'a [u8]) -> (Statement<'a>, usize) {
     match op_code {
         1 => (Statement::EndSequence, actual_size),
         2 => {
-            let arg = ULeb128Ref::from_bytes(&input[offset..]);
+            let arg = ULeb128::from_bytes(&input[offset..]);
             (Statement::SetAddress(arg.expect_u64()), actual_size)
         }
         3 => {
             let name = parse_str(&input[offset]);
             let mut count = offset + name.len() + 1;
-            let arg1 = ULeb128Ref::from_bytes(&input[count..]);
+            let arg1 = ULeb128::from_bytes(&input[count..]);
             count += arg1.byte_count();
-            let arg2 = ULeb128Ref::from_bytes(&input[count..]);
+            let arg2 = ULeb128::from_bytes(&input[count..]);
             count += arg2.byte_count();
-            let arg3 = ULeb128Ref::from_bytes(&input[count..]);
+            let arg3 = ULeb128::from_bytes(&input[count..]);
             count += arg3.byte_count();
             assert!(count <= actual_size, "size mismatch");
             (Statement::DefineFile(name,
@@ -169,7 +169,7 @@ fn read_statement_extended<'a>(input: &'a [u8]) -> (Statement<'a>, usize) {
                                    arg3.expect_u64()), actual_size)
         }
         4 => {
-            let arg = ULeb128Ref::from_bytes(&input[offset..]);
+            let arg = ULeb128::from_bytes(&input[offset..]);
             (Statement::SetDiscriminator(arg.expect_u32()), actual_size)
         }
         _ => unreachable!("But found {} {}", op_code, size.expect_u32()),
