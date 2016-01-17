@@ -2,8 +2,7 @@ use std::mem;
 use std::fmt;
 
 use leb128::{ULeb128, ILeb128};
-
-use parsing::{read, parse, parse_str, parse_strs_to_null, parse_array};
+use zero::{read, read_str, read_strs_to_null, read_array, Pod};
 
 // Read the lines program and compute the lines table.
 
@@ -36,20 +35,20 @@ pub fn decode_lines<'a>(mut lines: LinesProgram<'a>) -> LinesTable<'a> {
 
 fn read_header(input: &[u8]) -> Header {
     let header_start_size = mem::size_of::<HeaderStart>();
-    let header_start = parse::<HeaderStart>(&input[..header_start_size]);
+    let header_start = read::<HeaderStart>(&input[..header_start_size]);
     assert!(header_start.length < 0xfffffff0, "64 bit DWARF or extended DWARF");
 
     let lengths_len = (header_start.opcode_base - 1) as usize;
     let standard_opcode_lengths =
-        parse_array(&input[header_start_size..header_start_size + lengths_len]);
-    let include_directories = parse_strs_to_null(&input[header_start_size + lengths_len..]);
-    let next_offset = header_start_size + lengths_len + include_directories.iter().fold(0, |a, s| a + s.len() + 1) + 1;
+        read_array(&input[header_start_size..header_start_size + lengths_len]);
+    let include_directories = read_strs_to_null(&input[header_start_size + lengths_len..]);
+    let next_offset = header_start_size + lengths_len + include_directories.clone().fold(0, |a, s| a + s.len() + 1) + 1;
     let file_names = read_file_entries(&input[next_offset..]);
 
     Header {
         header_start: header_start,
         standard_opcode_lengths: standard_opcode_lengths,
-        include_directories: include_directories,
+        include_directories: include_directories.collect(),
         file_names: file_names,
     }
 }
@@ -68,7 +67,7 @@ fn read_file_entry<'a>(input: &'a [u8]) -> Option<(FileEntry<'a>, usize)> {
         return None;
     }
 
-    let name = parse_str(&input[0]);
+    let name = read_str(&input[0..]);
     let mut count = name.len() + 1;
     let dir_index = ULeb128::from_bytes(&input[count..]);
     count += dir_index.byte_count();
@@ -127,7 +126,7 @@ fn read_statement<'a>(header: &Header<'a>, input: &'a [u8]) -> (Statement<'a>, u
         6 => (Statement::NegateStmt, 1),
         7 => (Statement::SetBasicBlock, 1),
         8 => (Statement::ConstAddPc, 1),
-        9 => (Statement::FixedAdvancePc(read(&input[1..3])), 3),
+        9 => (Statement::FixedAdvancePc(*read(&input[1..3])), 3),
         10 => (Statement::SetPrologueEnd, 1),
         11 => (Statement::SetEpilogueBeing, 1),
         12 => {
@@ -154,7 +153,7 @@ fn read_statement_extended<'a>(input: &'a [u8]) -> (Statement<'a>, usize) {
             (Statement::SetAddress(arg.expect_u64()), actual_size)
         }
         3 => {
-            let name = parse_str(&input[offset]);
+            let name = read_str(&input[offset..]);
             let mut count = offset + name.len() + 1;
             let arg1 = ULeb128::from_bytes(&input[count..]);
             count += arg1.byte_count();
@@ -191,6 +190,8 @@ struct HeaderStart {
     line_range: u8,
     opcode_base: u8,
 }
+
+unsafe impl Pod for HeaderStart {}
 
 #[derive(Debug)]
 struct Header<'a> {

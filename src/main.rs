@@ -2,15 +2,16 @@
 
 extern crate xmas_elf;
 extern crate leb128;
+extern crate zero;
 
 mod lines;
-mod parsing;
 mod abbrev;
 
 use xmas_elf::ElfFile;
 
 use std::mem;
 
+// TODO should be a library
 fn main() {
     let input = xmas_elf::open_file("foo.o");
     let elf_file = ElfFile::new(&input);
