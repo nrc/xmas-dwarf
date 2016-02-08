@@ -34,10 +34,10 @@ pub fn decode_lines<'a>(mut lines: LinesProgram<'a>) -> LinesTable<'a> {
 }
 
 fn read_header(input: &[u8]) -> Header {
-    let header_start_size = mem::size_of::<HeaderStart>();
-    let header_start = read::<HeaderStart>(&input[..header_start_size]);
+    let header_start = read::<HeaderStart>(input);
     assert!(header_start.length < 0xfffffff0, "64 bit DWARF or extended DWARF");
 
+    let header_start_size = mem::size_of::<HeaderStart>();
     let lengths_len = (header_start.opcode_base - 1) as usize;
     let standard_opcode_lengths =
         read_array(&input[header_start_size..header_start_size + lengths_len]);

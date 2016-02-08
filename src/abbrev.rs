@@ -5,10 +5,10 @@ use leb128::ULeb128;
 use std::fmt;
 use std::mem;
 
-use {Tag, Attribute, Form};
+use {Tag, Attribute, Form, read_unsigned_leb128};
 
 pub fn read_table(input: &[u8]) -> AbbrevTable {
-    let mut result = vec![];
+    let mut result = vec![AbbrevEntry::null()];
     let mut count = 0;
 
     loop {
@@ -60,20 +60,27 @@ fn read_pairs_to_null(input: &[u8]) -> (Vec<(ULeb128, ULeb128)>, usize) {
     }
 }
 
-fn read_unsigned_leb128(input: &[u8]) -> (ULeb128, usize) {
-    let result = ULeb128::from_bytes(input);
-    (result, result.byte_count())
-}
 
 #[derive(Debug)]
-pub struct AbbrevTable(Vec<AbbrevEntry>);
+pub struct AbbrevTable(pub Vec<AbbrevEntry>);
 
 #[derive(Debug)]
 pub struct AbbrevEntry {
-    code: u64,
-    tag: Tag,
-    children: Children,
-    attributes: Vec<(Attribute, Form)>,
+    pub code: u64,
+    pub tag: Tag,
+    pub children: Children,
+    pub attributes: Vec<(Attribute, Form)>,
+}
+
+impl AbbrevEntry {
+    fn null() -> AbbrevEntry {
+        AbbrevEntry {
+            code: 0,
+            tag: Tag::None,
+            children: Children::No,
+            attributes: vec![],
+        }
+    }
 }
 
 impl fmt::Display for AbbrevEntry {

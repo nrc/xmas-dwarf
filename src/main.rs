@@ -1,26 +1,71 @@
-#![feature(raw)]
-
 extern crate xmas_elf;
 extern crate leb128;
 extern crate zero;
 
 mod lines;
 mod abbrev;
+mod info;
 
 use xmas_elf::ElfFile;
+use leb128::{ULeb128, ILeb128};
+use zero::{read, read_str};
+use abbrev::{AbbrevTable, Children};
+use lines::LinesTable;
+use info::{Unit, HasChildren};
 
 use std::mem;
 
-// TODO should be a library
+// FIXME should be a library
 fn main() {
     let input = xmas_elf::open_file("foo.o");
     let elf_file = ElfFile::new(&input);
-    let abbrev = abbrev::read_table(raw_data(&elf_file, SectionName::Abbrev));
-    // println!("{}", abbrev);
-    let lines = lines::read_lines(raw_data(&elf_file, SectionName::Line));
-    println!("{}", lines);
-    let lines = lines::decode_lines(lines);
-    println!("{}", lines);
+    let dwarf_file = DwarfFile::new(&elf_file);
+    // println!("{}", dwarf_file.abbrev);
+    // println!("{}", dwarf_file.lines);
+    // println!("{}", dwarf_file.lines);
+    for unit in &dwarf_file.info {
+        println!("{}", unit);
+
+        for die in &unit.dies {
+            if let &Some(ref die) = die {
+                if die.has_children() == Children::Yes {
+                    println!("children:");
+                    for c in die.children(&unit) {
+                        println!("{}", c);
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub struct DwarfFile<'a> {
+    pub abbrev: Box<AbbrevTable>,
+    pub lines: LinesTable<'a>,
+    pub info: Vec<Unit<'a>>,
+    pub data: &'a ElfFile<'a>,
+}
+
+impl<'a> DwarfFile<'a> {
+    pub fn new(input: &'a ElfFile<'a>) -> DwarfFile<'a> {
+        let abbrev = raw_data(input, SectionName::Abbrev);
+        let abbrev = Box::new(abbrev::read_table(abbrev));
+        let lines = raw_data(input, SectionName::Line);
+        let lines = lines::decode_lines(lines::read_lines(lines));
+        
+        let info = raw_data(input, SectionName::Info);
+        // This transmute dance is because we can't persuade the borrow checker
+        // that result.abbrev will live for 'a. It will because it is owned by
+        // result. I guess be careful.
+        let info = info::read_info(info, unsafe { mem::transmute(&*abbrev) });
+
+        DwarfFile {
+            abbrev: abbrev,
+            lines: lines,
+            info: info,
+            data: input,
+        }
+    }
 }
 
 fn raw_data<'a>(elf_file: &'a ElfFile<'a>, name: SectionName) -> &'a [u8] {
@@ -36,26 +81,52 @@ fn raw_data<'a>(elf_file: &'a ElfFile<'a>, name: SectionName) -> &'a [u8] {
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum SectionName {
-    Info,
-    Line,
+    // Abbreviations used in the .debug_info section.
     Abbrev,
+    // Lookup table for mapping addresses to compilation units.
+    Aranges,
+    // Call frame information.
+    Frame,
+    // The core DWARF information section.
+    Info,
+    // Line number information.
+    Line,
+    // Location lists used in DW_AT_location attributes.
+    Loc,
+    // Macro information.
+    MacInfo,
+    // Lookup table for mapping object and function names to compilation units.
+    PubNames,
+    // Lookup table for mapping type names to compilation units.
+    PubTypes,
+    // Address ranges used in DW_AT_ranges attributes.
+    Ranges,
+    // String table used in .debug_info.
     Str,
-    // TODO ...
 }
 
 impl SectionName {
     fn as_str(self) -> &'static str {
         match self {
+            SectionName::Abbrev => ".debug_abbrev",
+            SectionName::Aranges => ".debug_aranges",
+            SectionName::Frame => ".debug_frame",
             SectionName::Info => ".debug_info",
             SectionName::Line => ".debug_line",
-            SectionName::Abbrev => ".debug_abbrev",
+            SectionName::Loc => ".debug_loc",
+            SectionName::MacInfo => ".debug_macinfo",
+            SectionName::PubNames => ".debug_pubnames",
+            SectionName::PubTypes => ".debug_pubtypes",
+            SectionName::Ranges => ".debug_ranges",
             SectionName::Str => ".debug_str",
         }
     }
 }
 
+
 #[derive(Debug, Clone)]
 pub enum Tag {
+    None,
     ArrayType,
     ClassType,
     EntryPoint,
@@ -122,6 +193,7 @@ pub enum Tag {
 impl Tag {
     pub fn as_u16(&self) -> u16 {
         match *self {
+            Tag::None => 0,
             Tag::ArrayType => 0x01,
             Tag::ClassType => 0x02,
             Tag::EntryPoint => 0x03,
@@ -188,6 +260,7 @@ impl Tag {
 
     pub fn from_u16(input: u16) -> Tag {
         match input {
+            0x0 => Tag::None,
             0x01 => Tag::ArrayType,
             0x02 => Tag::ClassType,
             0x03 => Tag::EntryPoint,
@@ -280,8 +353,9 @@ pub enum Form {
     Indirect = 0x16,
     SecOffset = 0x17,
     Exprloc = 0x18,
+    // FIXME DWARF v4 stuff
     FlagPresent = 0x19,
-    RefSig8 = 0x20,
+    // RefSig8 = 0x20,
 }
 
 impl Form {
@@ -290,12 +364,77 @@ impl Form {
     }
 
     pub fn from_u8(input: u8) -> Form {
-        assert!((input <= 0x19 && input != 2) || input == 0x20, "Invalid form: {}", input);
+        //assert!((input <= 0x19 && input != 2) || input == 0x20, "Invalid form: {}", input);
+        assert!(input <= 0x19 && input != 2, "Invalid form: {}", input);
         unsafe { mem::transmute(input) }
     }
 }
 
-#[derive(Debug, Clone)]
+// Data stored for an attribute, the 'type' corresponds with the form specified in
+// the abbreviation.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum AttrData<'a> {
+    // Assumes target is 64 bit.
+    Addr(u64),
+    Block(&'a [u8]),
+    // FIXME If the target machine is big-endian, the data forms will be broken.
+    Data1(u8),
+    Data2(u16),
+    Data4(u32),
+    Data8(u64),
+    Udata(ULeb128<'a>),
+    Sdata(ILeb128<'a>),
+    String(&'a str),
+    FlagPresent,
+    // RefSig8(u64),
+}
+
+impl<'a> AttrData<'a> {
+    // Returns the parsed data and the size in input.
+    fn from_data(input: &'a [u8], form: Form) -> (AttrData, usize) {
+        match form {
+            Form::Addr => (AttrData::Addr(*read(input)), 8),
+            Form::Block | Form::Exprloc => {
+                let (len, size) = read_unsigned_leb128(input);
+                let len = len.expect_usize();
+                (AttrData::Block(&input[size..size + len]), size + len)
+            },
+            Form::Block1 => {
+                let len = *read::<u8>(input) as usize;
+                (AttrData::Block(&input[1..len + 1]), len + 1)
+            },
+            Form::Block2 => {
+                let len = *read::<u16>(input) as usize;
+                (AttrData::Block(&input[2..len + 2]), len + 2)
+            },
+            Form::Block4 => {
+                let len = *read::<u32>(input) as usize;
+                (AttrData::Block(&input[4..len + 4]), len + 4)
+            },
+            Form::Data1 | Form::Ref1 | Form::Flag => (AttrData::Data1(*read(input)), 1),
+            Form::Data2 | Form::Ref2 => (AttrData::Data2(*read(input)), 2),
+            Form::Data4 | Form::Ref4 | Form::RefAddr | Form::Strp | Form::SecOffset => (AttrData::Data4(*read(input)), 4),
+            Form::Data8 | Form::Ref8 => (AttrData::Data8(*read(input)), 8),
+            Form::Sdata => {
+                let (len, size) = read_signed_leb128(input);
+                (AttrData::Sdata(len), size)
+            },
+            Form::Udata | Form::RefUdata => {
+                let (len, size) = read_unsigned_leb128(input);
+                (AttrData::Udata(len), size)
+            },
+            Form::String => {
+                let s = read_str(input);
+                (AttrData::String(s), s.len() + 1)
+            },
+            Form::FlagPresent => (AttrData::FlagPresent, 0),
+            // TODO
+            Form::Indirect => unimplemented!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum Attribute {
     Sibling,
     Location,
@@ -592,5 +731,12 @@ impl Attribute {
 }
 
 
+fn read_unsigned_leb128(input: &[u8]) -> (ULeb128, usize) {
+    let result = ULeb128::from_bytes(input);
+    (result, result.byte_count())
+}
 
-
+fn read_signed_leb128(input: &[u8]) -> (ILeb128, usize) {
+    let result = ILeb128::from_bytes(input);
+    (result, result.byte_count())
+}
