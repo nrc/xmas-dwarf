@@ -9,9 +9,9 @@ pub mod info;
 use xmas_elf::ElfFile;
 use leb128::{ULeb128, ILeb128};
 use zero::{read, read_str};
-use abbrev::{AbbrevTable, Children};
+use abbrev::AbbrevTable;
 use lines::LinesTable;
-use info::{Unit, HasChildren};
+use info::Unit;
 
 use std::mem;
 
@@ -48,10 +48,10 @@ fn raw_data<'a>(elf_file: &'a ElfFile<'a>, name: SectionName) -> &'a [u8] {
     use xmas_elf::sections::SectionData;
 
     let sect = elf_file.find_section_by_name(name.as_str()).unwrap();
-    if let SectionData::Undefined(data) = sect.get_data(&elf_file) {
+    if let Ok(SectionData::Undefined(data)) = sect.get_data(&elf_file) {
         data
     } else {
-        unreachable!()
+        panic!("Error retrieving data, or wrong kind of data");
     }
 }
 
