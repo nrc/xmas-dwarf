@@ -2,8 +2,15 @@
 name = "xmas-dwarf"
 version = "0.1.0"
 authors = ["Nick Cameron <ncameron@mozilla.com>"]
+description = "Library for parsing and interpreting DWARF data."
+license = "Apache-2.0/MIT"
+repository = "https://github.com/nrc/xmas-dwarf"
 
 [dependencies]
 xmas-elf = { git = "https://github.com/nrc/xmas-elf" }
 leb128 = { git = "https://github.com/nrc/leb128" }
 zero = "0.1.2"
+
+[[bin]]
+name = "xmas_dwarf"
+publish = "false"

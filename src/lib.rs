@@ -2,9 +2,9 @@ extern crate xmas_elf;
 extern crate leb128;
 extern crate zero;
 
-mod lines;
-mod abbrev;
-mod info;
+pub mod lines;
+pub mod abbrev;
+pub mod info;
 
 use xmas_elf::ElfFile;
 use leb128::{ULeb128, ILeb128};
@@ -14,30 +14,6 @@ use lines::LinesTable;
 use info::{Unit, HasChildren};
 
 use std::mem;
-
-// FIXME should be a library
-fn main() {
-    let input = xmas_elf::open_file("foo.o");
-    let elf_file = ElfFile::new(&input);
-    let dwarf_file = DwarfFile::new(&elf_file);
-    // println!("{}", dwarf_file.abbrev);
-    // println!("{}", dwarf_file.lines);
-    // println!("{}", dwarf_file.lines);
-    for unit in &dwarf_file.info {
-        println!("{}", unit);
-
-        for die in &unit.dies {
-            if let &Some(ref die) = die {
-                if die.has_children() == Children::Yes {
-                    println!("children:");
-                    for c in die.children(&unit) {
-                        println!("{}", c);
-                    }
-                }
-            }
-        }
-    }
-}
 
 pub struct DwarfFile<'a> {
     pub abbrev: Box<AbbrevTable>,
